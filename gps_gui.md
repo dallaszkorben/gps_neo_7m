@@ -5,12 +5,12 @@ GPS module NEO-7M connected to Raspberry Pi with a 7-inch touchscreen, displayin
 
 ## Hardware Wiring
 
-| NEO-7M | → | RPi Pin | GPIO |
-|--------|---|---------|------|
-| VCC | → | Pin 1 | 3.3V |
-| GND | → | Pin 6 | GND |
-| TX | → | Pin 10 | GPIO 15 (RXD) |
-| RX | → | Pin 8 | GPIO 14 (TXD) |
+| NEO-7M | → | RPi Pin | GPIO          |
+|--------|---|---------|---------------|
+| VCC    | → | Pin 1   | 3.3V          |
+| GND    | → | Pin 6   | GND           |
+| TX     | → | Pin 10  | GPIO 15 (RXD) |
+| RX     | → | Pin 8   | GPIO 14 (TXD) |
 
 **Important**: TX↔RX are crossed — GPS TX connects to Pi RX and vice versa.
 
@@ -141,12 +141,12 @@ ser.close()
 
 ## GPS Quality Values
 
-| Value | Name | Meaning |
-|-------|------|---------|
-| 0 | Invalid | No fix — not enough satellites |
-| 1 | GPS fix | Standard positioning, ~2.5–5m accuracy |
-| 2 | DGPS fix | Differential GPS with ground corrections, ~1–2m |
-| 3 | PPS fix | Precise Positioning Service, sub-meter |
+| Value | Name     | Meaning                                         |
+|-------|----------|-------------------------------------------------|
+| 0     | Invalid  | No fix — not enough satellites                  |
+| 1     | GPS fix  | Standard positioning, ~2.5–5m accuracy          |
+| 2     | DGPS fix | Differential GPS with ground corrections, ~1–2m |
+| 3     | PPS fix  | Precise Positioning Service, sub-meter          |
 
 ## Troubleshooting
 
@@ -156,3 +156,4 @@ ser.close()
 - **Serial port busy**: Check with `sudo lsof /dev/serial0`
 - **tkinter not found**: `sudo apt install python3-tk`
 - **GUI doesn't appear**: Make sure you're running on the Pi desktop, not over SSH (or use `export DISPLAY=:0` before running)
+pGJEWuDolEUtU7v2VV6YAYIQhoTfAT2lAg4D
