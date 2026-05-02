@@ -1,96 +1,74 @@
 #!/usr/bin/env python3
+"""
+GPS GUI — Proof of Concept.
+Simple fullscreen display of GPS coordinates using gps_core.
+Shows same output as main project's COORDS view.
+"""
+
+import sys
+import atexit
 import tkinter as tk
-import serial
-import pynmea2
-import random
+sys.path.insert(0, "/home/pi/Projects/gps_neo_7m/nautical_gps")
+from gps_core import open_serial, read_gps, close
+atexit.register(close)
 
-DEMO_MODE = False
+# Connect to GPS (retries until successful)
+import time
+while not open_serial():
+    time.sleep(3)
 
-# --- Open the GPS serial port ---
-# NEO-7M sends NMEA data at 9600 baud on /dev/serial0
-# If the port doesn't exist (e.g. running on desktop), switch to demo mode
-try:
-    ser = serial.Serial('/dev/serial0', baudrate=9600, timeout=0.5)
-except (serial.SerialException, OSError):
-    print("Serial port not available — running in DEMO mode")
-    ser = None
-    DEMO_MODE = True
-
-# --- Create the GUI window ---
+# --- GUI ---
 root = tk.Tk()
-root.title("GPS")
+root.title("GPS POC")
 root.configure(bg='black')
-root.attributes('-fullscreen', True)       # Fill the entire screen (7" touchscreen)
-root.bind('<Escape>', lambda e: root.destroy())  # Press Escape to quit
+root.attributes('-fullscreen', True)
+root.bind('<Escape>', lambda e: on_close())
 
-# --- Variables that hold the displayed text ---
-# StringVar is a tkinter mechanism: when you call .set() on it,
-# any Label linked to it updates automatically on screen
 lat_var = tk.StringVar(value="---.------")
 lon_var = tk.StringVar(value="---.------")
-time_var = tk.StringVar(value="Time: --:--:--")
-qual_var = tk.StringVar(value="Quality: -")
-sat_var = tk.StringVar(value="Satellites: -")
+info_var = tk.StringVar(value="Waiting for GPS...")
 
-# --- Layout: labels stacked vertically ---
-# Lat/Lon: big bold green text (the main info)
 tk.Label(root, textvariable=lat_var, font=("Helvetica", 48, "bold"),
-         fg='lime', bg='black').pack(pady=(40, 5))
+         fg='lime', bg='black').pack(pady=(80, 5))
 tk.Label(root, textvariable=lon_var, font=("Helvetica", 48, "bold"),
          fg='lime', bg='black').pack(pady=5)
-# Time, quality, satellites: smaller white text
-tk.Label(root, textvariable=time_var, font=("Helvetica", 24),
-         fg='white', bg='black').pack(pady=10)
-tk.Label(root, textvariable=qual_var, font=("Helvetica", 24),
-         fg='white', bg='black').pack(pady=5)
-tk.Label(root, textvariable=sat_var, font=("Helvetica", 24),
-         fg='white', bg='black').pack(pady=5)
+tk.Label(root, textvariable=info_var, font=("Helvetica", 24),
+         fg='white', bg='black').pack(pady=30)
 
 
 def update():
-    """Read one line from GPS and update the display.
+    data = read_gps()
 
-    This function is called repeatedly by root.after() — tkinter's way of
-    scheduling a function to run after a delay (in milliseconds) without
-    blocking the GUI. It's like a timer that fires every 1000ms.
-    We can't use a while-loop here because that would freeze the window.
-    """
-    if DEMO_MODE:
-        # Simulate GPS data with slight random movement (for desktop testing)
-        lat = 47.497913 + random.uniform(-0.0001, 0.0001)
-        lon = 19.040236 + random.uniform(-0.0001, 0.0001)
-        lat_var.set(f"{lat:.6f} N")
-        lon_var.set(f"{lon:.6f} E")
-        time_var.set("Time: 12:34:56")
-        qual_var.set("Quality: GPS fix")
-        sat_var.set("Satellites: 8")
+    if data is None:
+        root.after(100, update)
+        return
+
+    if data['status'] == 'error':
+        info_var.set(f"⚠ {data['message']} — reconnecting...")
+        root.after(2000, update)
+        return
+
+    if data['status'] == 'no_data':
+        root.after(100, update)
+        return
+
+    if data['status'] == 'fix':
+        lat_var.set(f"{data['lat']} {data['lat_dir']}")
+        lon_var.set(f"{data['lon']} {data['lon_dir']}")
+        info_var.set(f"Time: {data['time']}  |  Sats: {data['sats_used']} used / {data['sats_visible']} visible  |  {data['quality']}")
     else:
-        # Read one NMEA sentence from the GPS module
-        line = ser.readline().decode('ascii', errors='replace').strip()
-        # We only care about GGA sentences — they contain position + satellite info
-        # $GPGGA = GPS only, $GNGGA = multi-constellation (GPS+GLONASS)
-        if line.startswith('$GPGGA') or line.startswith('$GNGGA'):
-            try:
-                msg = pynmea2.parse(line)
-                lat_var.set(f"{msg.latitude:.6f} {msg.lat_dir}")
-                lon_var.set(f"{msg.longitude:.6f} {msg.lon_dir}")
-                time_var.set(f"Time: {msg.timestamp}")
-                qual_var.set(f"Quality: {['Invalid','GPS fix','DGPS fix','PPS fix'][min(msg.gps_qual,3)]}")
-                sat_var.set(f"Satellites: {msg.num_sats}")
-            except pynmea2.ParseError:
-                pass
+        lat_var.set("Waiting for fix...")
+        lon_var.set("")
+        info_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
 
-    # Schedule this function to run again in 1000ms (1 second)
-    # This is how tkinter does repeated updates without freezing the GUI
     root.after(1000, update)
 
 
-# Start the first update after 1 second
+def on_close():
+    close()  # Restore serial port settings so cat works after
+    root.destroy()
+
+
+root.protocol("WM_DELETE_WINDOW", on_close)
 root.after(1000, update)
-
-# Run the GUI event loop (blocks here until window is closed)
 root.mainloop()
-
-# Clean up serial port when done
-if ser:
-    ser.close()

@@ -1,4 +1,7 @@
 # Byte-compiled / optimized / DLL files
+
+nautical_gps/maps/tiles/osm_tiles.db
+
 __pycache__/
 *.py[cod]
 *$py.class
@@ -105,13 +108,13 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-#.env
-#.venv
-#env/
-#venv/
-#ENV/
-#env.bak/
-#venv.bak/
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
 # Spyder project settings
 .spyderproject
