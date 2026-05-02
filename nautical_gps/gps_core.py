@@ -14,6 +14,9 @@ SERIAL_PORT = '/dev/serial0'
 BAUD_RATE = 9600
 QUALITY_NAMES = ['No fix', 'GPS fix', 'DGPS fix', 'PPS fix']
 
+# Show decimal seconds in DMS format (e.g., 18.99" vs 19")
+SHOW_DMS_DECIMALS = False
+
 _sats_in_view = '0'
 
 def _dd_to_dms(dd):
@@ -22,7 +25,10 @@ def _dd_to_dms(dd):
     m_full = (dd - d) * 60
     m = int(m_full)
     s = (m_full - m) * 60
-    return f"{d}°{m:02d}'{s:05.2f}\""
+    if SHOW_DMS_DECIMALS:
+        return f"{d}°{m:02d}'{s:05.2f}\""
+    else:
+        return f"{d}°{m:02d}'{int(round(s)):02d}\""
 
 _ser = None
 _original_termios = None
@@ -128,8 +134,10 @@ def read_gps():
             'status': 'fix',
             'time': str(msg.timestamp),
             'lat': _dd_to_dms(msg.latitude),
+            'lat_raw': msg.latitude,
             'lat_dir': msg.lat_dir,
             'lon': _dd_to_dms(msg.longitude),
+            'lon_raw': msg.longitude,
             'lon_dir': msg.lon_dir,
             'quality': QUALITY_NAMES[min(msg.gps_qual, 3)],
             'sats_used': str(msg.num_sats or '0'),

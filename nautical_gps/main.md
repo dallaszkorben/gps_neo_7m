@@ -10,8 +10,8 @@ Button panel on the right for view switching.
 +----------------------------------+----------+
 |                                  | [COORDS] |
 |   Content area                   | [MAP]    |
-|   (COORDS / MAP / CAM)           | [CAM]    |
-|                                  | [SAVE]   |
+|   (COORDS / MAP / CAM / CONF)    | [CAM]    |
+|                                  | [CONF]   |
 |                                  | [REC]    |
 +----------------------------------+----------+
 ```
@@ -20,6 +20,7 @@ Active button is highlighted green. Views:
 - **COORDS** — big bold GPS coordinates (default)
 - **MAP** — OpenStreetMap with GPS position marker (offline tiles for Karlskrona)
 - **CAM** — live MJPEG stream from ESP32-CAM
+- **CONF** — configuration settings (persistent)
 
 ## Hardware
 
@@ -145,10 +146,16 @@ sudo apt install python3-tk
 ├── camera.py             ← POC: ESP32-CAM stream viewer
 ├── venv/                 ← Python virtual environment
 └── nautical_gps/         ← Main project
-    ├── main.py           ← Entry point (3-view app)
-    ├── gps_core.py       ← Shared GPS logic (port reset, open, read)
+    ├── main.py           ← Entry point (thin orchestrator, view switching)
+    ├── coords_view.py    ← COORDS view (GPS display + update loop)
+    ├── map_view.py       ← MAP view (offline OpenStreetMap)
+    ├── cam_view.py       ← CAM view (multi-camera streams + grid)
+    ├── conf_view.py      ← CONF view (settings UI)
+    ├── gps_core.py       ← GPS logic (serial, NMEA parsing, DMS conversion)
+    ├── cam_discovery.py  ← mDNS camera discovery
+    ├── see_board.cfg     ← Persistent configuration
     ├── main.md           ← This documentation
-    ├── charts/           ← KAP chart files (unused, OpenCPN broken on Pi)
+    ├── charts/           ← KAP chart files (unused)
     ├── maps/tiles/       ← Offline OSM tiles (osm_tiles.db, 148 MB)
     └── requirements.txt
 ```
@@ -233,6 +240,36 @@ pio run -t upload
 - **Screen goes black**: Run `xset s off && xset -dpms` or check lightdm config
 - **Can't SSH to Pi when hotspot active**: Connect your laptop to GREEN-BEAN, SSH to 10.42.0.1
 - **OpenCPN**: Broken on this Pi (segfault). Using tkintermapview instead.
+
+## CONF View (Configuration)
+
+Settings are stored in `see_board.cfg` (INI format, absolute path used internally).
+
+### Available Settings
+
+| Setting | Section | Key | Default |
+|---------|---------|-----|---------|
+| Show decimal seconds | gps | show_dms_decimals | False |
+| Camera rotation | cam | rotation | 0 |
+
+### Behavior
+- Changes are saved to  immediately when toggled
+- When switching to COORDS view, the config file is re-read and applied
+- GPS coordinates are formatted at display time (not at parse time), so changes take effect within 1 second of switching views
+
+### Config File Format
+```ini
+[gps]
+show_dms_decimals = True
+
+[cam]
+rotation = 90
+```
+
+
+### DMS Display Formats
+- **Decimals OFF**: 
+- **Decimals ON**: 
 
 ## TODO
 - SAVE button — waypoint storage in SQLite

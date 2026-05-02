@@ -1,173 +1,189 @@
-"""
-Camera View — displays multiple MJPEG streams in a grid layout.
-
-Grid logic:
-  1 camera  → full screen
-  2 cameras → 2 columns, 1 row
-  3-4 cameras → 2x2 grid
-  5-6 cameras → 3x2 grid
-  7-9 cameras → 3x3 grid
-"""
+"""CAM view — live MJPEG streams from ESP32 cameras with auto-discovery."""
 
 import tkinter as tk
-from PIL import Image, ImageTk
-import urllib.request
-import io
 import threading
-import time
-import socket
+import io
 import math
-from cam_discovery import start as start_discovery, stop as stop_discovery, get_cameras
+from PIL import Image, ImageTk
+from cam_discovery import start as start_cam_discovery, get_cameras, reset as reset_cam_discovery
+import urllib.request as cam_urllib
 
 
-class CameraStream:
-    """Handles reading a single MJPEG stream in a background thread."""
+# Module-level state
+_streams = {}   # {url: {"running": bool, "frame": bytes|None}}
+_known = {}     # {name: url}
 
-    def __init__(self, url):
-        self.url = url
-        self.current_frame = None
-        self.lock = threading.Lock()
-        self.running = True
-        self.thread = threading.Thread(target=self._reader, daemon=True)
-        self.thread.start()
 
-    def _reader(self):
-        MAX_BUF = 200000
-        while self.running:
-            try:
-                stream = urllib.request.urlopen(self.url, timeout=5)
-                stream.fp.raw._sock.settimeout(10)
-                buf = b''
-                while self.running:
-                    chunk = stream.read(4096)
-                    if not chunk:
+def create(parent, fonts):
+    """Create the CAM view frame and return (frame, update_func, on_show).
+
+    Args:
+        parent: parent tkinter widget
+        fonts: dict with FONT_STATUS
+    Returns:
+        frame, update_cam, on_show, stop_all
+    """
+    frame = tk.Frame(parent, bg='black')
+    label = tk.Label(frame, text="Searching for cameras...",
+                     font=fonts["FONT_STATUS"], fg="white", bg="black")
+    label.pack(fill="both", expand=True)
+
+    return frame, label
+
+
+def stop_all():
+    """Stop all camera streams."""
+    global _streams, _known
+    for s in _streams.values():
+        s["running"] = False
+    _streams = {}
+    _known = {}
+
+
+def on_show(root, rebuild_delay=2000):
+    """Called when switching to CAM view — reset discovery and rebuild."""
+    reset_cam_discovery()
+    root.after(rebuild_delay, rebuild_grid)
+
+
+def rebuild_grid():
+    """Stop old streams, discover cameras, start new streams."""
+    global _known, _streams
+    # Stop old
+    for s in _streams.values():
+        s["running"] = False
+    _streams = {}
+    _known = {}
+    # Discover
+    cameras = get_cameras()
+    _known = cameras
+    # Start new streams
+    for name, url in cameras.items():
+        state = {"running": True, "frame": None}
+        t = threading.Thread(target=_reader, args=(url, state), daemon=True)
+        t.start()
+        _streams[url] = state
+
+
+def _reader(url, state):
+    """Background thread: reads MJPEG stream, extracts JPEG frames."""
+    import time as _t
+    MAX_BUF = 200000
+    while state["running"]:
+        try:
+            stream = cam_urllib.urlopen(url, timeout=5)
+            stream.fp.raw._sock.settimeout(10)
+            buf = b""
+            while state["running"]:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                if len(buf) > MAX_BUF:
+                    buf = buf[-MAX_BUF:]
+                while True:
+                    s = buf.find(b"\xff\xd8")
+                    e = buf.find(b"\xff\xd9", s + 2) if s != -1 else -1
+                    if s != -1 and e != -1:
+                        state["frame"] = buf[s:e + 2]
+                        buf = buf[e + 2:]
+                    else:
                         break
-                    buf += chunk
-                    if len(buf) > MAX_BUF:
-                        buf = buf[-MAX_BUF:]
-                    while True:
-                        start = buf.find(b'\xff\xd8')
-                        end = buf.find(b'\xff\xd9', start + 2) if start != -1 else -1
-                        if start != -1 and end != -1:
-                            jpg = buf[start:end + 2]
-                            buf = buf[end + 2:]
-                            with self.lock:
-                                self.current_frame = jpg
-                        else:
-                            break
-            except (urllib.error.URLError, socket.timeout, OSError):
-                pass
-            time.sleep(1)
-
-    def get_frame(self):
-        with self.lock:
-            frame = self.current_frame
-            self.current_frame = None
-            return frame
-
-    def stop(self):
-        self.running = False
+        except Exception:
+            pass
+        _t.sleep(1)
 
 
-class CamView(tk.Frame):
-    """Multi-camera grid view widget."""
+def update_cam(root, label, config, get_view_mode, running_flag):
+    """Update camera display. Schedules itself via root.after.
 
-    def __init__(self, parent):
-        super().__init__(parent, bg='black')
-        self.streams = {}  # {url: CameraStream}
-        self.labels = {}   # {url: tk.Label}
-        self.known_cameras = {}
-        self.running = True
+    Args:
+        root: tk root window
+        label: the cam_label widget
+        config: ConfigParser instance (re-read for rotation)
+        get_view_mode: callable returning current view mode string
+        running_flag: list with single bool [True/False]
+    """
+    global _known, _streams
 
-        # Status label shown when no cameras found
-        self.status_var = tk.StringVar(value="Searching for cameras...")
-        self.status_label = tk.Label(self, textvariable=self.status_var,
-                                     font=("Helvetica", 18), fg='white', bg='black')
-        self.status_label.place(relx=0.5, rely=0.5, anchor='center')
-
-        start_discovery()
-
-    def update_view(self):
-        """Check for camera changes and update the grid. Call periodically."""
-        if not self.running:
-            return
-
+    if get_view_mode() == "cam":
+        # Auto-rebuild if new cameras appeared
         cameras = get_cameras()
+        if len(cameras) > len(_known):
+            rebuild_grid()
 
-        # Check if camera list changed
-        if cameras != self.known_cameras:
-            self.known_cameras = cameras
-            self._rebuild_grid()
-
-        # Update each camera's image
-        for url, stream in list(self.streams.items()):
-            if url not in self.labels:
-                continue
-            label = self.labels[url]
-            w = label.winfo_width()
-            h = label.winfo_height()
-            if w < 10 or h < 10:
-                continue  # Label not rendered yet, wait
-            frame = stream.get_frame()
-            if frame:
-                try:
-                    img = Image.open(io.BytesIO(frame)).rotate(-90, expand=True)
-                    img = img.resize((w, h), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(img)
-                    label.config(image=photo)
-                    label.image = photo
-                except Exception:
-                    pass
-
-    def _rebuild_grid(self):
-        """Rebuild the grid layout based on current camera count."""
-        # Stop old streams
-        for stream in self.streams.values():
-            stream.stop()
-        self.streams.clear()
-
-        # Remove old labels
-        for label in self.labels.values():
-            label.destroy()
-        self.labels.clear()
-
-        urls = list(self.known_cameras.values())
+        urls = list(_streams.keys())
         n = len(urls)
 
         if n == 0:
-            self.status_label.place(relx=0.5, rely=0.5, anchor='center')
-            self.status_var.set("Searching for cameras...")
-            return
+            label.config(text="Searching for cameras...", image="")
+            label.image = None
+        elif n == 1:
+            _display_single(root, label, urls[0], config)
+        else:
+            _display_multi(root, label, urls, n, config)
 
-        self.status_label.place_forget()
+    if running_flag[0]:
+        root.after(50, lambda: update_cam(root, label, config, get_view_mode, running_flag))
 
-        # Calculate grid dimensions
-        cols = math.ceil(math.sqrt(n))
-        rows = math.ceil(n / cols)
 
-        # Reset all grid weights to 0 first (clear old layout)
-        for r in range(10):
-            self.grid_rowconfigure(r, weight=0, minsize=0)
-        for c in range(10):
-            self.grid_columnconfigure(c, weight=0, minsize=0)
+def _get_rotation(config):
+    """Read rotation from config (re-reads each frame for live changes)."""
+    return config.getint("cam", "rotation", fallback=0)
 
-        # Set uniform weights for active rows/cols
-        for r in range(rows):
-            self.grid_rowconfigure(r, weight=1, uniform=row)
-        for c in range(cols):
-            self.grid_columnconfigure(c, weight=1, uniform=col)
 
-        # Create labels and streams — all cells same size
-        for i, url in enumerate(urls):
-            r = i // cols
-            c = i % cols
-            label = tk.Label(self, bg='black')
-            label.grid(row=r, column=c, sticky='nsew', padx=1, pady=1)
-            self.labels[url] = label
-            self.streams[url] = CameraStream(url)
+def _display_single(root, label, url, config):
+    """Display a single camera fullscreen."""
+    f = _streams[url]["frame"]
+    if not f:
+        return
+    _streams[url]["frame"] = None
+    try:
+        img = Image.open(io.BytesIO(f))
+        rot = _get_rotation(config)
+        if rot:
+            img = img.rotate(-rot, expand=True)
+        w = root.winfo_width() - 120
+        h = root.winfo_height()
+        if w > 50 and h > 50:
+            iw, ih = img.size
+            scale = min(w / iw, h / ih)
+            img = img.resize((int(iw * scale), int(ih * scale)), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(img)
+        label.config(image=photo, text="")
+        label.image = photo
+    except Exception:
+        pass
 
-    def stop(self):
-        self.running = False
-        for stream in self.streams.values():
-            stream.stop()
-        stop_discovery()
+
+def _display_multi(root, label, urls, n, config):
+    """Display multiple cameras in a grid composite."""
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    w = root.winfo_width() - 120
+    h = root.winfo_height()
+    if w <= 50 or h <= 50:
+        return
+    cell_w = w // cols
+    cell_h = h // rows
+    composite = Image.new("RGB", (w, h), "black")
+    for i, url in enumerate(urls):
+        f = _streams[url]["frame"]
+        if f:
+            _streams[url]["frame"] = None
+            try:
+                img = Image.open(io.BytesIO(f))
+                rot = _get_rotation(config)
+                if rot:
+                    img = img.rotate(-rot, expand=True)
+                iw, ih = img.size
+                scale = min(cell_w / iw, cell_h / ih)
+                img = img.resize((int(iw * scale), int(ih * scale)), Image.LANCZOS)
+                r = i // cols
+                c = i % cols
+                composite.paste(img, (c * cell_w, r * cell_h))
+            except Exception:
+                pass
+    photo = ImageTk.PhotoImage(composite)
+    label.config(image=photo, text="")
+    label.image = photo
