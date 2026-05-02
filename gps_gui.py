@@ -8,7 +8,7 @@ import sys
 import atexit
 import time
 import tkinter as tk
-sys.path.insert(0, "/home/pi/Projects/gps_neo_7m/nautical_gps")
+sys.path.insert(0, "/home/pi/Projects/seeboard")
 from gps_core import open_serial, read_gps, close
 
 while not open_serial():

@@ -1,6 +1,8 @@
 # Byte-compiled / optimized / DLL files
 
-nautical_gps/maps/tiles/osm_tiles.db
+maps/tiles/osm_tiles.db
+charts
+maps
 
 __pycache__/
 *.py[cod]

@@ -7,7 +7,7 @@ import atexit
 
 import sys
 import time
-sys.path.insert(0, "/home/pi/Projects/gps_neo_7m/nautical_gps")
+sys.path.insert(0, "/home/pi/Projects/seeboard")
 from gps_core import open_serial, read_gps, close
 atexit.register(close)
 

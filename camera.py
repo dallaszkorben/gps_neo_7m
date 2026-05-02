@@ -12,7 +12,7 @@ Architecture:
   - Auto-reconnects if the stream drops (ESP32 rebooted, WiFi glitch, etc.)
 
 Usage:
-  source ~/Projects/gps_neo_7m/venv/bin/activate
+  source ~/Projects/seeboard/venv/bin/activate
   python camera.py
   Press Escape to exit.
 """

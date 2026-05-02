@@ -1,4 +1,0 @@
-pyserial
-pynmea2
-tkintermapview
-gpsdclient
