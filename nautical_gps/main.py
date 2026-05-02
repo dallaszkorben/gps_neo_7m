@@ -19,8 +19,8 @@ import os
 import threading
 import time
 import io
-import socket
-import urllib.request
+
+
 from PIL import Image, ImageTk
 from gps_core import open_serial, read_gps, close
 atexit.register(close)
@@ -32,8 +32,17 @@ while not open_serial():
 root = tk.Tk()
 root.title("Nautical GPS")
 root.configure(bg='black')
+root.update_idletasks()
 root.attributes('-fullscreen', True)
+root.update()
 root.bind('<Escape>', lambda e: on_close())
+
+# Calculate font sizes relative to screen height
+_sh = root.winfo_screenheight()
+FONT_COORD = ("Helvetica", _sh // 7, "bold")
+FONT_INFO = ("Helvetica", _sh // 20)
+FONT_STATUS = ("Helvetica", _sh // 27)
+FONT_BTN = ("Helvetica", _sh // 34, "bold")
 
 # ─── Right panel: buttons ───
 btn_panel = tk.Frame(root, bg='#222222', width=120)
@@ -46,48 +55,58 @@ view_mode = 'coords'
 
 def show_view(mode):
     """Switch to the specified view. Hides all others."""
-    global view_mode
+    global view_mode, cam_streams, cam_known
     coords_frame.pack_forget()
     map_frame.pack_forget()
     cam_frame.pack_forget()
+
+    # Always stop camera streams when switching views or re-entering CAM
+    if cam_streams:
+        for s in cam_streams.values():
+            s["running"] = False
+        cam_streams = {}
+        cam_known = {}
 
     if mode == 'coords':
         coords_frame.pack(fill='both', expand=True)
     elif mode == 'map':
         map_frame.pack(fill='both', expand=True)
     elif mode == 'cam':
+        reset_cam_discovery()  # Clear cache, restart discovery fresh
         cam_frame.pack(fill='both', expand=True)
+        root.after(2000, rebuild_cam_grid)  # Wait for fresh discovery, then rebuild
 
     view_mode = mode
-    # Highlight the active button, dim the others
-    coords_btn.config(fg='lime' if mode == 'coords' else 'white')
-    map_btn.config(fg='lime' if mode == 'map' else 'white')
-    cam_btn.config(fg='lime' if mode == 'cam' else 'white')
+    for btn, m in [(coords_btn, 'coords'), (map_btn, 'map'), (cam_btn, 'cam')]:
+            if mode == m:
+                btn.config(fg='lime', bg='#666666', activeforeground='lime', activebackground='#777777')
+            else:
+                btn.config(fg='white', bg='#444444', activeforeground='white', activebackground='#555555')
 
 
 # View buttons — each switches to its view
-coords_btn = tk.Button(btn_panel, text="COORDS", font=("Helvetica", 14, "bold"),
-                       bg='#444444', fg='lime', activebackground='#666666',
+coords_btn = tk.Button(btn_panel, text="COORDS", font=FONT_BTN,
+                       bg="#666666", fg='lime', activebackground='#666666',
                        command=lambda: show_view('coords'))
 coords_btn.pack(fill='x', padx=5, pady=(20, 5), ipady=12)
 
-map_btn = tk.Button(btn_panel, text="MAP", font=("Helvetica", 14, "bold"),
+map_btn = tk.Button(btn_panel, text="MAP", font=FONT_BTN,
                     bg='#444444', fg='white', activebackground='#666666',
                     command=lambda: show_view('map'))
 map_btn.pack(fill='x', padx=5, pady=5, ipady=12)
 
-cam_btn = tk.Button(btn_panel, text="CAM", font=("Helvetica", 14, "bold"),
+cam_btn = tk.Button(btn_panel, text="CAM", font=FONT_BTN,
                     bg='#444444', fg='white', activebackground='#666666',
                     command=lambda: show_view('cam'))
 cam_btn.pack(fill='x', padx=5, pady=5, ipady=12)
 
 # TODO: SAVE button
-tk.Button(btn_panel, text="SAVE", font=("Helvetica", 14, "bold"),
+tk.Button(btn_panel, text="SAVE", font=FONT_BTN,
           bg='#444444', fg='gray', state='disabled'
           ).pack(fill='x', padx=5, pady=5, ipady=12)
 
 # TODO: REC/STOP button
-tk.Button(btn_panel, text="REC", font=("Helvetica", 14, "bold"),
+tk.Button(btn_panel, text="REC", font=FONT_BTN,
           bg='#444444', fg='gray', state='disabled'
           ).pack(fill='x', padx=5, pady=5, ipady=12)
 
@@ -105,17 +124,17 @@ qual_var = tk.StringVar(value="Quality: -")
 sat_var = tk.StringVar(value="Satellites: - used / - visible")
 status_var = tk.StringVar(value="")
 
-tk.Label(coords_frame, textvariable=lat_var, font=("Helvetica", 48, "bold"),
+tk.Label(coords_frame, textvariable=lat_var, font=FONT_COORD,
          fg='lime', bg='black').pack(pady=(40, 5))
-tk.Label(coords_frame, textvariable=lon_var, font=("Helvetica", 48, "bold"),
+tk.Label(coords_frame, textvariable=lon_var, font=FONT_COORD,
          fg='lime', bg='black').pack(pady=5)
-tk.Label(coords_frame, textvariable=time_var, font=("Helvetica", 24),
+tk.Label(coords_frame, textvariable=time_var, font=FONT_INFO,
          fg='white', bg='black').pack(pady=10)
-tk.Label(coords_frame, textvariable=qual_var, font=("Helvetica", 24),
+tk.Label(coords_frame, textvariable=qual_var, font=FONT_INFO,
          fg='white', bg='black').pack(pady=5)
-tk.Label(coords_frame, textvariable=sat_var, font=("Helvetica", 24),
+tk.Label(coords_frame, textvariable=sat_var, font=FONT_INFO,
          fg='white', bg='black').pack(pady=5)
-tk.Label(coords_frame, textvariable=status_var, font=("Helvetica", 18),
+tk.Label(coords_frame, textvariable=status_var, font=FONT_STATUS,
          fg='red', bg='black').pack(pady=20)
 
 coords_frame.pack(fill='both', expand=True)
@@ -137,27 +156,26 @@ marker = map_widget.set_marker(56.1612, 15.5869, text="GPS")
 
 # ─── CAM view ───
 cam_frame = tk.Frame(content, bg='black')
-cam_label = tk.Label(cam_frame, bg='black')
-cam_label.pack(fill='both', expand=True)
-
-# Camera stream reader (background thread)
-STREAM_URL = "http://esp32-cam.local:81/stream"
-MAX_BUF = 200000
-cam_current_frame = None
-cam_frame_lock = threading.Lock()
-cam_last_frame_time = 0
+cam_label = tk.Label(cam_frame, text="Searching for cameras...", font=FONT_STATUS, fg="white", bg="black")
+cam_label.pack(fill="both", expand=True)
 running = True
 
+# Camera streaming (uses discovery)
+from cam_discovery import start as start_cam_discovery, get_cameras, reset as reset_cam_discovery
+import urllib.request as cam_urllib
+# Discovery starts when CAM view is selected
 
-def cam_stream_reader():
-    """Background thread: reads MJPEG stream from ESP32-CAM."""
-    global cam_current_frame, running, cam_last_frame_time
-    while running:
+cam_streams = {}  # {url: {thread, frame, lock}}
+cam_known = {}
+
+def _cam_reader(url, state):
+    MAX_BUF = 200000
+    while state["running"]:
         try:
-            stream = urllib.request.urlopen(STREAM_URL, timeout=5)
+            stream = cam_urllib.urlopen(url, timeout=5)
             stream.fp.raw._sock.settimeout(10)
-            buf = b''
-            while running:
+            buf = b""
+            while state["running"]:
                 chunk = stream.read(4096)
                 if not chunk:
                     break
@@ -165,49 +183,107 @@ def cam_stream_reader():
                 if len(buf) > MAX_BUF:
                     buf = buf[-MAX_BUF:]
                 while True:
-                    start = buf.find(b'\xff\xd8')
-                    end = buf.find(b'\xff\xd9', start + 2) if start != -1 else -1
-                    if start != -1 and end != -1:
-                        jpg = buf[start:end + 2]
-                        buf = buf[end + 2:]
-                        with cam_frame_lock:
-                            cam_current_frame = jpg
-                            cam_last_frame_time = time.time()
+                    s = buf.find(b"\xff\xd8")
+                    e = buf.find(b"\xff\xd9", s+2) if s != -1 else -1
+                    if s != -1 and e != -1:
+                        state["frame"] = buf[s:e+2]
+                        buf = buf[e+2:]
                     else:
                         break
-        except (urllib.error.URLError, socket.timeout, OSError):
+        except Exception:
             pass
-        time.sleep(1)
+        import time as _t; _t.sleep(1)
 
 
-# Start camera reader thread
-cam_thread = threading.Thread(target=cam_stream_reader, daemon=True)
-cam_thread.start()
 
+
+
+
+
+
+def rebuild_cam_grid():
+    """Stop old streams, discover cameras, start new streams."""
+    global cam_known, cam_streams
+    # Stop old streams
+    for s in cam_streams.values():
+        s["running"] = False
+    cam_streams = {}
+    cam_known = {}
+    # Get current cameras
+    
+    cameras = get_cameras()
+    cam_known = cameras
+    # Start new streams
+    for name, url in cameras.items():
+        state = {"running": True, "frame": None}
+        t = threading.Thread(target=_cam_reader, args=(url, state), daemon=True)
+        t.start()
+        cam_streams[url] = state
 
 def update_cam():
-    """Update camera display (only when CAM view is active)."""
-    global cam_current_frame
-    if view_mode == 'cam':
-        frame = None
-        with cam_frame_lock:
-            if cam_current_frame:
-                frame = cam_current_frame
-                cam_current_frame = None
-        if frame:
-            try:
-                img = Image.open(io.BytesIO(frame)).rotate(-90, expand=True)
-                w = cam_frame.winfo_width()
-                h = cam_frame.winfo_height()
-                if w > 1 and h > 1:
-                    img = img.resize((w, h), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                cam_label.config(image=photo)
+    """Update camera display with auto-discovery grid."""
+    global cam_known, cam_streams
+    if view_mode == "cam":
+        # Auto-rebuild if NEW cameras appeared (more than we had)
+        cameras = get_cameras()
+        if len(cameras) > len(cam_known):
+            rebuild_cam_grid()
+
+        # Display frames
+        urls = list(cam_streams.keys())
+        n = len(urls)
+        if n == 0:
+            cam_label.config(text="Searching for cameras...", image="")
+            cam_label.image = None
+        elif n == 1:
+            f = cam_streams[urls[0]]["frame"]
+            if f:
+                cam_streams[urls[0]]["frame"] = None
+                try:
+                    img = Image.open(io.BytesIO(f))
+                    w = root.winfo_width() - 120
+                    h = root.winfo_height()
+                    if w > 50 and h > 50:
+                        # Maintain aspect ratio
+                        iw, ih = img.size
+                        scale = min(w / iw, h / ih)
+                        img = img.resize((int(iw * scale), int(ih * scale)), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    cam_label.config(image=photo, text="")
+                    cam_label.image = photo
+                except Exception:
+                    pass
+        else:
+            # Multi-camera: composite into one image
+            import math
+            cols = math.ceil(math.sqrt(n))
+            rows = math.ceil(n / cols)
+            w = root.winfo_width() - 120
+            h = root.winfo_height()
+            if w > 50 and h > 50:
+                cell_w = w // cols
+                cell_h = h // rows
+                composite = Image.new("RGB", (w, h), "black")
+                for i, url in enumerate(urls):
+                    f = cam_streams[url]["frame"]
+                    if f:
+                        cam_streams[url]["frame"] = None
+                        try:
+                            img = Image.open(io.BytesIO(f))
+                            iw, ih = img.size
+                            scale = min(cell_w / iw, cell_h / ih)
+                            img = img.resize((int(iw * scale), int(ih * scale)), Image.LANCZOS)
+                            r = i // cols
+                            c = i % cols
+                            composite.paste(img, (c * cell_w, r * cell_h))
+                        except Exception:
+                            pass
+                photo = ImageTk.PhotoImage(composite)
+                cam_label.config(image=photo, text="")
                 cam_label.image = photo
-            except Exception:
-                pass
+
     if running:
-        root.after(33, update_cam)
+        root.after(50, update_cam)
 
 
 # ─── GPS update loop ───
@@ -258,8 +334,11 @@ def update_gps():
             last_lat = lat
             last_lon = lon
     else:
-        lat_var.set("Waiting for fix...")
-        lon_var.set("")
+        lat_var.set("---.------")
+        lon_var.set("---.------")
+        status_var.set("Waiting for fix...")
+        qual_var.set("Quality: No fix")
+        time_var.set(f"Time: {data['time']}")
         sat_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
 
     root.after(1000, update_gps)
@@ -268,6 +347,8 @@ def update_gps():
 def on_close():
     global running
     running = False
+    for s in cam_streams.values():
+        s["running"] = False
     root.destroy()
 
 

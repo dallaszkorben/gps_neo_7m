@@ -1,8 +1,5 @@
 """
 GPS Core — shared GPS reading logic.
-
-Saves serial port terminal settings before pyserial modifies them,
-restores on close(). This ensures cat /dev/serial0 works after exit.
 """
 
 import serial
@@ -18,6 +15,15 @@ BAUD_RATE = 9600
 QUALITY_NAMES = ['No fix', 'GPS fix', 'DGPS fix', 'PPS fix']
 
 _sats_in_view = '0'
+
+def _dd_to_dms(dd):
+    """Convert decimal degrees to degrees, minutes, seconds string."""
+    d = int(dd)
+    m_full = (dd - d) * 60
+    m = int(m_full)
+    s = (m_full - m) * 60
+    return f"{d}°{m:02d}'{s:05.2f}\""
+
 _ser = None
 _original_termios = None
 
@@ -30,8 +36,8 @@ def _save_port_settings():
         fd = os.open(SERIAL_PORT, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         _original_termios = termios.tcgetattr(fd)
         os.close(fd)
-    except Exception as e:
-        print(f"Warning: could not save port settings: {e}")
+    except Exception:
+        pass
 
 
 def _restore_port_settings():
@@ -121,9 +127,9 @@ def read_gps():
         return {
             'status': 'fix',
             'time': str(msg.timestamp),
-            'lat': f"{msg.latitude:.6f}",
+            'lat': _dd_to_dms(msg.latitude),
             'lat_dir': msg.lat_dir,
-            'lon': f"{msg.longitude:.6f}",
+            'lon': _dd_to_dms(msg.longitude),
             'lon_dir': msg.lon_dir,
             'quality': QUALITY_NAMES[min(msg.gps_qual, 3)],
             'sats_used': str(msg.num_sats or '0'),
@@ -132,6 +138,7 @@ def read_gps():
     else:
         return {
             'status': 'no_fix',
+            'time': str(msg.timestamp),
             'sats_used': str(msg.num_sats or '0'),
             'sats_visible': _sats_in_view,
         }
@@ -148,5 +155,4 @@ def close():
     _restore_port_settings()
 
 
-# Always restore port settings on exit, no matter how the program ends
 atexit.register(close)

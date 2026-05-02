@@ -238,3 +238,145 @@ pio run -t upload
 - SAVE button — waypoint storage in SQLite
 - REC/STOP button — continuous track recording to SQLite
 - gpsd integration — share GPS between multiple apps
+
+## Multi-Camera System
+
+### Architecture
+```
+Pi (GREEN-BEAN AP) ←WiFi→ ESP32-CAM #1 (esp32-cam-a1b2.local)
+                   ←WiFi→ ESP32-CAM #2 (esp32-cam-c3d4.local)
+                   ←WiFi→ ESP32-CAM #3 (esp32-cam-e5f6.local)
+                   ...
+```
+
+### Auto-Discovery
+- Cameras advertise `_mjpeg._tcp` mDNS service on port 81
+- Pi uses `zeroconf` library to discover all cameras automatically
+- No hardcoded URLs — plug in a new camera and it appears on screen
+
+### Grid Layout (CAM view)
+- 1 camera → fullscreen
+- 2 cameras → 2 columns, 1 row
+- 3-4 cameras → 2x2 grid
+- 5-6 cameras → 3x2 grid
+- 7-9 cameras → 3x3 grid
+
+Layout rebuilds automatically when cameras connect/disconnect.
+
+### Camera Hostnames
+Each ESP32 gets a unique mDNS name from its MAC address:
+`esp32-cam-XXYY.local` (last 2 bytes of MAC in hex)
+
+### Project Files
+- `cam_discovery.py` — mDNS service browser (finds cameras on network)
+- `cam_view.py` — multi-camera grid widget (auto-sizing layout)
+
+### Dependencies
+```bash
+pip install zeroconf pillow
+```
+
+### Flashing Cameras
+All cameras use the same firmware. Flash from the desktop:
+```bash
+cd ~/Projects/esp32/esp32-cam-stream
+pio run -t upload  # connect each ESP32 one at a time
+```
+
+### Verifying Discovery
+On the Pi, check if cameras are found:
+```python
+from cam_discovery import start, get_cameras
+import time
+start()
+time.sleep(5)
+print(get_cameras())
+```
+
+## mDNS Service Discovery Explained
+
+### What is it?
+mDNS (multicast DNS) + DNS-SD (service discovery) lets devices announce themselves
+on a local network without any manual configuration. Same technology as Apple Bonjour,
+Linux Avahi, Chromecast, AirPlay, network printers.
+
+### How our cameras use it
+Each ESP32-CAM advertises a custom service `_mjpeg._tcp` on port 81:
+```cpp
+// In ESP32 firmware:
+MDNS.addService("mjpeg", "tcp", 81);
+```
+
+The Pi discovers all devices advertising this service:
+```python
+# In cam_discovery.py:
+SERVICE_TYPE = "_mjpeg._tcp.local."
+```
+
+The service name `_mjpeg._tcp` is our own choice — not a standard. Both sides just need to match.
+
+### Useful commands
+
+List all cameras on the network:
+```bash
+avahi-browse -rtp _mjpeg._tcp
+```
+
+List all mDNS services on the network:
+```bash
+avahi-browse -all
+```
+
+Resolve a specific hostname:
+```bash
+avahi-resolve -n esp32-cam-8550.local
+```
+
+Install avahi tools (if not present):
+```bash
+sudo apt install avahi-utils
+```
+
+## Viewing Camera in Browser
+
+Connect your laptop/phone to the GREEN-BEAN WiFi, then open:
+
+```
+http://esp32-cam-8550.local:81/stream
+```
+
+Or by IP:
+```
+http://10.42.0.73:81/stream
+```
+
+To find camera IPs:
+```bash
+avahi-browse -rtp _mjpeg._tcp
+# or
+arp -a
+```
+
+**Note**: Each ESP32 can only serve ~1 stream client at a time. If main.py is
+streaming from a camera (CAM view active), the browser won't connect to that
+same camera. Switch to COORDS/MAP view first to free the stream slot.
+
+## CAM View Behavior
+
+### Grid rules
+- 1 camera → fullscreen
+- 2 cameras → side by side
+- 3-4 cameras → 2x2 grid
+- Layout uses full available space, maintains aspect ratio
+
+### Dynamic behavior
+- **New camera connects** (while on CAM view): grid auto-rebuilds to include it
+- **Camera disconnects** (while on CAM view): its slot goes black, grid stays
+- **Click CAM button** (even if already on CAM): clears discovery cache, re-discovers only live cameras, rebuilds grid fresh. Dead camera placeholders are removed.
+
+### Technical flow on CAM button press
+1. Stop all active streams
+2. Clear discovery cache (reset)
+3. Restart mDNS discovery
+4. Wait 2 seconds for live cameras to respond
+5. Rebuild grid with only responding cameras
