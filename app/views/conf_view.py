@@ -1,4 +1,13 @@
-"""CONF view — configuration settings with persistent storage."""
+"""CONF view — configuration settings with persistent storage.
+
+Settings are saved to disk immediately on change (not on app exit) so that
+values survive crashes. The COORDS and CAM views re-read the config file
+each time they're shown, ensuring changes take effect without restart.
+
+Uses radio buttons and checkboxes instead of dropdowns because tkinter's
+OptionMenu doesn't respond well to touchscreen taps (requires precise
+press-hold-release gesture that's difficult on a 5" resistive screen).
+"""
 
 import tkinter as tk
 
@@ -9,8 +18,8 @@ def create(parent, fonts, config, save_config, config_file):
     Args:
         parent: parent tkinter widget
         fonts: dict with keys FONT_INFO, FONT_STATUS
-        config: ConfigParser instance
-        save_config: callable to persist config
+        config: ConfigParser instance (shared with other views)
+        save_config: callable to persist config to disk
         config_file: absolute path to config file
     Returns:
         frame: the conf_frame widget
@@ -21,11 +30,18 @@ def create(parent, fonts, config, save_config, config_file):
              fg='white', bg='black').pack(pady=(20, 20))
 
     # ─── DMS decimals checkbox ───
+    # Controls whether GPS seconds show decimals (18.99" vs 19").
+    # BooleanVar is linked to the Checkbutton — tkinter updates it automatically.
     dms_decimal_var = tk.BooleanVar(
         value=config.getboolean("gps", "show_dms_decimals", fallback=False))
 
     def on_dms_toggle():
-        """Save DMS decimal preference to config file."""
+        """Save DMS decimal preference to config file immediately.
+
+        Only saves to file here — the actual gps_core.SHOW_DMS_DECIMALS
+        variable is updated when the user switches to COORDS view
+        (via coords_on_show). This avoids tight coupling between views.
+        """
         val = dms_decimal_var.get()
         config.set("gps", "show_dms_decimals", str(val))
         save_config(config)
@@ -38,6 +54,8 @@ def create(parent, fonts, config, save_config, config_file):
                    activeforeground='white').pack(pady=10, padx=20, anchor='w')
 
     # ─── Camera rotation radio buttons ───
+    # Radio buttons chosen over dropdown because they're easier to tap
+    # on a touchscreen — each option is a separate large touch target.
     tk.Label(frame, text="Camera rotation:", font=fonts["FONT_STATUS"],
              fg='white', bg='black').pack(pady=(20, 5), padx=20, anchor='w')
 
@@ -45,7 +63,11 @@ def create(parent, fonts, config, save_config, config_file):
         value=str(config.getint("cam", "rotation", fallback=0)))
 
     def on_rotation_change():
-        """Save camera rotation to config file."""
+        """Save camera rotation to config file immediately.
+
+        The CAM view reads this value every frame (not cached) so rotation
+        changes take effect instantly without needing to re-enter CAM view.
+        """
         if not config.has_section("cam"):
             config.add_section("cam")
         config.set("cam", "rotation", cam_rotation_var.get())

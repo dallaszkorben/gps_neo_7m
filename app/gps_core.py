@@ -1,5 +1,13 @@
 """
-GPS Core — shared GPS reading logic.
+GPS Core — serial port management and NMEA sentence parsing.
+
+Handles the NEO-7M GPS module connected via UART (/dev/serial0).
+Key design decisions:
+- Uses pyserial (not stty) to configure the port, so Python controls all settings.
+- Saves/restores termios settings via atexit so that `cat /dev/serial0` still
+  works after the script exits (even on crash).
+- Auto-reconnects on serial errors without crashing the GUI.
+- Returns raw float lat/lon alongside DMS strings so callers can use either.
 """
 
 import serial
@@ -12,29 +20,47 @@ import atexit
 
 SERIAL_PORT = '/dev/serial0'
 BAUD_RATE = 9600
+
+# Human-readable names for GGA quality indicator values
 QUALITY_NAMES = ['No fix', 'GPS fix', 'DGPS fix', 'PPS fix']
 
-# Show decimal seconds in DMS format (e.g., 18.99" vs 19")
+# Controls whether DMS format includes decimal seconds (e.g., 18.99" vs 19").
+# Modified at runtime by conf_view when user toggles the setting.
 SHOW_DMS_DECIMALS = False
 
+# Satellites in view, updated from GSV sentences.
+# Stored module-level because GSV and GGA arrive in separate sentences.
 _sats_in_view = '0'
 
+
 def _dd_to_dms(dd):
-    """Convert decimal degrees to degrees, minutes, seconds string."""
+    """Convert decimal degrees to DMS string (e.g., 56°10'18").
+
+    Called at display time (not parse time) so that changes to
+    SHOW_DMS_DECIMALS take effect immediately without waiting for
+    a new GPS sentence.
+    """
     d = int(dd)
     m_full = (dd - d) * 60
     m = int(m_full)
     s = (m_full - m) * 60
     if SHOW_DMS_DECIMALS:
-        return f"{d}°{m:02d}'{s:05.2f}\""
+        return f"{d}\u00b0{m:02d}'{s:05.2f}\""
     else:
-        return f"{d}°{m:02d}'{int(round(s)):02d}\""
+        return f"{d}\u00b0{m:02d}'{int(round(s)):02d}\""
+
 
 _ser = None
 _original_termios = None
 
 
 def _save_port_settings():
+    """Save the serial port's original termios settings.
+
+    Done once before we open the port with pyserial. This lets us restore
+    the exact original state on exit, so other tools (cat, minicom) still
+    work on the port without needing `stty sane`.
+    """
     global _original_termios
     if _original_termios is not None:
         return
@@ -47,6 +73,11 @@ def _save_port_settings():
 
 
 def _restore_port_settings():
+    """Restore the serial port to its original termios state.
+
+    Called on exit (via atexit) to undo any changes pyserial made.
+    Without this, `cat /dev/serial0` may show garbled output or nothing.
+    """
     global _original_termios
     if _original_termios is None:
         return
@@ -59,6 +90,11 @@ def _restore_port_settings():
 
 
 def open_serial():
+    """Open the GPS serial port. Returns True on success, False on failure.
+
+    Closes any existing connection first to handle reconnection cleanly.
+    Saves termios before opening so we can restore on exit.
+    """
     global _ser
     if _ser:
         try:
@@ -76,6 +112,8 @@ def open_serial():
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
+            # 2s timeout: long enough for a full NMEA cycle (1s) but short
+            # enough to detect a disconnected module quickly.
             timeout=2,
         )
         _ser.reset_input_buffer()
@@ -87,8 +125,24 @@ def open_serial():
 
 
 def read_gps():
+    """Read one NMEA sentence and return parsed GPS data.
+
+    Returns:
+        dict with 'status' key:
+            'fix'     — valid position (includes lat/lon/time/quality/sats)
+            'no_fix'  — GPS running but no satellite lock yet
+            'no_data' — empty read (timeout, no sentence available)
+            'error'   — serial port problem (will auto-reconnect next call)
+        None — sentence was not GGA/GSV (ignored, call again)
+
+    Design: returns raw floats (lat_raw, lon_raw) alongside formatted DMS
+    strings. The raw values are used by the map for positioning; the DMS
+    strings are legacy and may be removed in the future since coords_view
+    now formats at display time using _dd_to_dms() directly.
+    """
     global _sats_in_view, _ser
 
+    # Auto-reconnect if port was lost
     if not _ser or not _ser.is_open:
         if not open_serial():
             time.sleep(1)
@@ -97,6 +151,8 @@ def read_gps():
     try:
         raw = _ser.readline()
     except (serial.SerialException, OSError) as e:
+        # Port disappeared (USB unplug, kernel error). Close and let next
+        # call attempt reconnection.
         print(f"Serial error: {e}")
         try:
             _ser.close()
@@ -115,12 +171,16 @@ def read_gps():
     if not line.startswith('$'):
         return None
 
+    # GSV sentences carry satellite-in-view count. We extract it here
+    # and store it module-level because GGA (position) sentences don't
+    # include this information.
     if line.startswith('$GPGSV') or line.startswith('$GNGSV'):
         match = re.match(r'\$G[PN]GSV,\d+,\d+,(\d+)', line)
         if match:
             _sats_in_view = match.group(1)
         return None
 
+    # Only process GGA sentences (position + quality + sat count)
     if not (line.startswith('$GPGGA') or line.startswith('$GNGGA')):
         return None
 
@@ -153,6 +213,7 @@ def read_gps():
 
 
 def close():
+    """Close serial port and restore original termios settings."""
     global _ser
     if _ser:
         try:
