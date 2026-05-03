@@ -29,6 +29,7 @@ def create(parent):
 
     if os.path.exists(TILES_DB):
         map_widget.database_path = TILES_DB
+        map_widget.use_database_only = True
 
     map_widget.set_position(DEFAULT_LAT, DEFAULT_LON)
     map_widget.set_zoom(DEFAULT_ZOOM)

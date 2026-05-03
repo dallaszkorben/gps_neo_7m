@@ -156,6 +156,13 @@ tk.Button(btn_panel, text="REC", font=fonts["FONT_BTN"],
           bg='#444444', fg='gray', state='disabled'
           ).pack(fill='x', padx=5, pady=5, ipady=12)
 
+# EXIT button at the bottom
+exit_frame = tk.Frame(btn_panel, bg='#222222')
+exit_frame.pack(side='bottom', fill='x')
+tk.Button(exit_frame, text="EXIT", font=fonts["FONT_BTN"],
+          bg='#444444', fg='red', activeforeground='red', activebackground='#555555',
+          command=lambda: on_close()).pack(fill='x', padx=5, pady=(5, 20), ipady=12)
+
 
 # ─── Cleanup ───
 def on_close():
