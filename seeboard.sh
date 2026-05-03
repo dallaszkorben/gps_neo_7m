@@ -9,4 +9,4 @@ sudo nmcli connection up Hotspot
 # Activate virtual environment and run
 source ~/Projects/seeboard/venv/bin/activate
 cd ~/Projects/seeboard
-python seeboard.py
+python app/seeboard.py

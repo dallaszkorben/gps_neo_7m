@@ -26,12 +26,12 @@ Active button is highlighted green. Views:
 
 ### NEO-7M GPS Wiring
 
-| NEO-7M | → | RPi Pin | GPIO |
-|--------|---|---------|------|
-| VCC | → | Pin 1 | 3.3V |
-| GND | → | Pin 6 | GND |
-| TX | → | Pin 10 | GPIO 15 (RXD) |
-| RX | → | Pin 8 | GPIO 14 (TXD) |
+| NEO-7M | → | RPi Pin | GPIO          |
+|--------|---|---------|---------------|
+| VCC    | → | Pin 1   | 3.3V          |
+| GND    | → | Pin 6   | GND           |
+| TX     | → | Pin 10  | GPIO 15 (RXD) |
+| RX     | → | Pin 8   | GPIO 14 (TXD) |
 
 TX↔RX are crossed.
 
@@ -165,7 +165,7 @@ sudo apt install python3-tk
 ```bash
 cd ~/Projects/seeboard
 source venv/bin/activate
-python seeboard.py
+python app/seeboard.py
 ```
 
 Press **Escape** to exit.
@@ -224,12 +224,12 @@ pio run -t upload
 
 ## GPS Quality Values
 
-| Value | Name | Meaning |
-|-------|------|---------|
-| 0 | No fix | Not enough satellites |
-| 1 | GPS fix | ~2.5–5m accuracy |
-| 2 | DGPS fix | ~1–2m |
-| 3 | PPS fix | Sub-meter |
+| Value | Name     | Meaning               |
+|-------|----------|-----------------------|
+| 0     | No fix   | Not enough satellites |
+| 1     | GPS fix  | ~2.5–5m accuracy      |
+| 2     | DGPS fix | ~1–2m                 |
+| 3     | PPS fix  | Sub-meter             |
 
 ## Troubleshooting
 
@@ -247,10 +247,10 @@ Settings are stored in `see_board.cfg` (INI format, absolute path used internall
 
 ### Available Settings
 
-| Setting | Section | Key | Default |
-|---------|---------|-----|---------|
-| Show decimal seconds | gps | show_dms_decimals | False |
-| Camera rotation | cam | rotation | 0 |
+| Setting              | Section | Key               | Default |
+|----------------------|---------|-------------------|---------|
+| Show decimal seconds | gps     | show_dms_decimals | False   |
+| Camera rotation      | cam     | rotation          | 0       |
 
 ### Behavior
 - Changes are saved to  immediately when toggled

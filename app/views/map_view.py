@@ -9,7 +9,7 @@ import tkintermapview
 DEFAULT_LAT = 56.1612
 DEFAULT_LON = 15.5869
 DEFAULT_ZOOM = 13
-TILES_DB = "/home/pi/Projects/seeboard/maps/tiles/osm_tiles.db"
+TILES_DB = "/home/pi/Projects/seeboard/app/maps/tiles/osm_tiles.db"
 
 
 def create(parent):

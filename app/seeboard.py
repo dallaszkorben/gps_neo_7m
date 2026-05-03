@@ -10,13 +10,16 @@ import tkinter as tk
 import configparser
 import atexit
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from gps_core import open_serial, close
 import gps_core
 
-import coords_view
-import map_view
-import cam_view
-import conf_view
+from views import coords_view
+from views import map_view
+from views import cam_view
+from views import conf_view
 
 atexit.register(close)
 
@@ -25,7 +28,7 @@ while not open_serial():
     import time; time.sleep(3)
 
 # ─── Configuration ───
-CONFIG_FILE = "/home/pi/Projects/seeboard/see_board.cfg"
+CONFIG_FILE = "/home/pi/Projects/seeboard/see_board.cfg"  # At project root
 
 
 def load_config():

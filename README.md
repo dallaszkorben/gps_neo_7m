@@ -11,11 +11,11 @@ Nautical GPS + multi-camera system for Raspberry Pi with touchscreen.
 
 ## Hardware
 
-| Component | Role |
-|-----------|------|
-| Raspberry Pi 3 | Main computer, WiFi access point |
-| 5" touchscreen | Display + input |
-| NEO-7M GPS | Position via serial UART |
+| Component             | Role                               |
+|-----------------------|------------------------------------|
+| Raspberry Pi 3        | Main computer, WiFi access point   |
+| 5" touchscreen        | Display + input                    |
+| NEO-7M GPS            | Position via serial UART           |
 | ESP32-WROVER-CAM (×N) | Wireless cameras (MJPEG over WiFi) |
 
 ## Architecture
@@ -34,16 +34,14 @@ Cameras connect to the Pi's hotspot and advertise themselves via mDNS (`_mjpeg._
 
 ## Views
 
-| Button | View |
-|--------|------|
-| COORDS | GPS coordinates, time, quality, satellite count |
-| MAP | Offline OpenStreetMap with position marker |
-| CAM | Live camera grid (auto-layout based on camera count) |
-| CONF | Settings (DMS decimals, camera rotation) |
+| Button | View                                                 |
+|--------|------------------------------------------------------|
+| COORDS | GPS coordinates, time, quality, satellite count      |
+| MAP    | Offline OpenStreetMap with position marker           |
+| CAM    | Live camera grid (auto-layout based on camera count) |
+| CONF   | Settings (DMS decimals, camera rotation)             |
 
 ## Setup
-
-### Raspberry Pi
 
 ```bash
 # Clone
@@ -62,23 +60,48 @@ sudo raspi-config  # Interface Options → Serial Port → Login shell: No, Hard
 #   dtoverlay=miniuart-bt
 
 # Run
-python seeboard.py
+./seeboard.sh
 ```
 
-### ESP32-CAM
+## Project Structure
 
-Firmware source: separate repo or `esp32-cam-stream/` on the development machine.
-
-```bash
-cd ~/Projects/esp32/esp32-cam-stream
-pio run -t upload
 ```
-
-Each camera gets a unique mDNS hostname from its MAC address and connects to the GREEN-BEAN WiFi AP automatically.
+seeboard/
+├── seeboard.sh           ← Launcher (activates hotspot + runs app)
+├── see_board.cfg         ← Persistent config
+├── README.md
+├── requirements.txt
+│
+├── app/                  ← Main application
+│   ├── seeboard.py       ← Entry point
+│   ├── gps_core.py       ← GPS serial/NMEA logic
+│   ├── cam_discovery.py  ← mDNS camera auto-discovery
+│   ├── views/
+│   │   ├── coords_view.py
+│   │   ├── map_view.py
+│   │   ├── cam_view.py
+│   │   └── conf_view.py
+│   └── maps/tiles/       ← Offline OSM tiles (not in repo)
+│
+├── poc/                  ← Proof-of-concept scripts
+│   ├── gps_console.py
+│   ├── gps_gui.py
+│   └── camera.py
+│
+├── tools/                ← Utilities
+│   └── download_tiles.py
+│
+├── docs/                 ← Documentation
+│   ├── main.md
+│   └── ...
+│
+└── icons/                ← Desktop icon
+    └── seeBoard.png
+```
 
 ## Configuration
 
-Settings are stored in `see_board.cfg` and persist across restarts:
+Settings in `see_board.cfg`:
 
 ```ini
 [gps]
@@ -88,33 +111,23 @@ show_dms_decimals = False
 rotation = 0
 ```
 
-## Project Structure
-
-```
-seeboard/
-├── seeboard.py       ← Entry point (view switching, button panel)
-├── coords_view.py    ← GPS coordinate display
-├── map_view.py       ← Offline map with position marker
-├── cam_view.py       ← Multi-camera streaming + grid layout
-├── conf_view.py      ← Settings UI
-├── gps_core.py       ← GPS serial/NMEA logic
-├── cam_discovery.py  ← mDNS camera auto-discovery
-├── see_board.cfg     ← Persistent config
-├── maps/tiles/       ← Offline OSM tiles (not in repo)
-├── gps_console.py    ← POC: GPS on terminal
-├── gps_gui.py        ← POC: GPS on screen
-├── camera.py         ← POC: single camera viewer
-└── venv/             ← Python virtual environment (not in repo)
-```
-
 ## GPS Wiring (NEO-7M → Raspberry Pi)
 
-| NEO-7M | RPi Pin | Function |
-|--------|---------|----------|
-| VCC | Pin 1 | 3.3V |
-| GND | Pin 6 | GND |
-| TX | Pin 10 | GPIO 15 (RXD) |
-| RX | Pin 8 | GPIO 14 (TXD) |
+| NEO-7M | RPi Pin | Function      |
+|--------|---------|---------------|
+| VCC    | Pin 1   | 3.3V          |
+| GND    | Pin 6   | GND           |
+| TX     | Pin 10  | GPIO 15 (RXD) |
+| RX     | Pin 8   | GPIO 14 (TXD) |
+
+## ESP32-CAM Firmware
+
+Firmware source: `~/Projects/esp32/esp32-cam-stream/`
+
+```bash
+cd ~/Projects/esp32/esp32-cam-stream
+pio run -t upload
+```
 
 ## License
 
