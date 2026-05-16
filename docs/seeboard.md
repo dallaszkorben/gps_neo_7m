@@ -194,7 +194,7 @@ loader.save_offline_tiles((56.225, 15.242), (55.944, 16.118), zoom_a=8, zoom_b=1
 
 ## ESP32-CAM Firmware
 
-Source: `~/Projects/esp32/esp32-cam-stream/` (on desktop machine)
+Source: `firmware/esp32-cam/` (in this project)
 
 Key details:
 - Board: Freenove ESP32-WROVER-CAM (esp-wrover-kit in PlatformIO)
@@ -209,7 +209,7 @@ Key details:
 
 Build & flash (from desktop):
 ```bash
-cd ~/Projects/esp32/esp32-cam-stream
+cd ~/Projects/seeboard/firmware/esp32-cam
 pio run -t upload
 ```
 
@@ -314,9 +314,9 @@ pip install zeroconf pillow
 ```
 
 ### Flashing Cameras
-All cameras use the same firmware. Flash from the desktop:
+All cameras use the same firmware. Flash from the Pi (with ESP32 connected via USB):
 ```bash
-cd ~/Projects/esp32/esp32-cam-stream
+cd ~/Projects/seeboard/firmware/esp32-cam
 pio run -t upload  # connect each ESP32 one at a time
 ```
 

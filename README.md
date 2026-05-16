@@ -43,6 +43,8 @@ Cameras connect to the Pi's hotspot and advertise themselves via mDNS (`_mjpeg._
 
 ## Setup
 
+### Raspberry Pi
+
 ```bash
 # Clone
 git clone https://github.com/dallaszkorben/seeboard.git
@@ -63,6 +65,17 @@ sudo raspi-config  # Interface Options → Serial Port → Login shell: No, Hard
 ./seeboard.sh
 ```
 
+### ESP32-CAM Firmware
+
+The firmware source lives in `firmware/esp32-cam/`. All cameras use the same firmware — each gets a unique mDNS hostname from its MAC address.
+
+```bash
+cd firmware/esp32-cam
+pio run -t upload    # connect each ESP32 via USB one at a time
+```
+
+See `docs/esp32-cam.md` for detailed firmware documentation.
+
 ## Project Structure
 
 ```
@@ -72,7 +85,7 @@ seeboard/
 ├── README.md
 ├── requirements.txt
 │
-├── app/                  ← Main application
+├── app/                  ← Pi application (Python)
 │   ├── seeboard.py       ← Entry point
 │   ├── gps_core.py       ← GPS serial/NMEA logic
 │   ├── cam_discovery.py  ← mDNS camera auto-discovery
@@ -83,6 +96,11 @@ seeboard/
 │   │   └── conf_view.py
 │   └── maps/tiles/       ← Offline OSM tiles (not in repo)
 │
+├── firmware/             ← ESP32 camera firmware (C++/PlatformIO)
+│   └── esp32-cam/
+│       ├── platformio.ini
+│       └── src/main.cpp
+│
 ├── poc/                  ← Proof-of-concept scripts
 │   ├── gps_console.py
 │   ├── gps_gui.py
@@ -92,7 +110,8 @@ seeboard/
 │   └── download_tiles.py
 │
 ├── docs/                 ← Documentation
-│   ├── main.md
+│   ├── seeboard.md
+│   ├── esp32-cam.md
 │   └── ...
 │
 └── icons/                ← Desktop icon
@@ -119,15 +138,6 @@ rotation = 0
 | GND    | Pin 6   | GND           |
 | TX     | Pin 10  | GPIO 15 (RXD) |
 | RX     | Pin 8   | GPIO 14 (TXD) |
-
-## ESP32-CAM Firmware
-
-Firmware source: `~/Projects/esp32/esp32-cam-stream/`
-
-```bash
-cd ~/Projects/esp32/esp32-cam-stream
-pio run -t upload
-```
 
 ## License
 

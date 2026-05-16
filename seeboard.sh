@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start seeBoard: activate hotspot, then launch the app
 
-export DISPLAY=:0
+# export DISPLAY=:0
 
 # Activate GREEN-BEAN WiFi AP
 sudo nmcli connection up Hotspot
