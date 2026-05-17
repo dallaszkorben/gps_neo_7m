@@ -32,15 +32,16 @@ from views import conf_view
 # would stop working until a manual `stty sane`.
 atexit.register(close)
 
-# Block until GPS serial port is available. The NEO-7M may take a few
-# seconds after power-on before the port is ready.
-while not open_serial():
-    import time; time.sleep(3)
+# Start GPS reading in background thread. Never blocks the main thread.
+# If GPS is not connected, the thread retries silently.
+open_serial()
+gps_core.start_background_reader()
 
 # ─── Configuration ───
 # Config file lives at project root (not inside app/) so it's easy to find
-# and edit manually if needed. Absolute path avoids issues with working directory.
-CONFIG_FILE = "/home/pi/Projects/seeboard/see_board.cfg"
+# and edit manually if needed. Derived from script location so it works
+# regardless of where the project is installed.
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "see_board.cfg")
 
 
 def load_config():
@@ -52,8 +53,43 @@ def load_config():
 
 
 def save_config(cfg):
+    """Save config with comments showing available options."""
+    # Ensure all sections and defaults exist before writing
+    if not cfg.has_section("gps"):
+        cfg.add_section("gps")
+    if not cfg.has_option("gps", "show_dms_decimals"):
+        cfg.set("gps", "show_dms_decimals", "False")
+
+    if not cfg.has_section("cam"):
+        cfg.add_section("cam")
+    if not cfg.has_option("cam", "rotation"):
+        cfg.set("cam", "rotation", "0")
+
+    if not cfg.has_section("coords"):
+        cfg.add_section("coords")
+    if not cfg.has_option("coords", "fix_color"):
+        cfg.set("coords", "fix_color", "lime")
+    if not cfg.has_option("coords", "nofix_color"):
+        cfg.set("coords", "nofix_color", "red")
+    if not cfg.has_option("coords", "error_color"):
+        cfg.set("coords", "error_color", "red")
+
     with open(CONFIG_FILE, "w") as f:
+        f.write("# seeBoard configuration\n")
+        f.write("#\n")
+        f.write("# [gps]\n")
+        f.write("#   show_dms_decimals: True / False (default: False)\n")
+        f.write("#\n")
+        f.write("# [cam]\n")
+        f.write("#   rotation: 0 / 90 / 180 / 270 (default: 0)\n")
+        f.write("#\n")
+        f.write("# [coords]\n")
+        f.write("#   fix_color:   lime / red / cyan / yellow (default: lime)\n")
+        f.write("#   nofix_color: lime / red / cyan / yellow (default: red)\n")
+        f.write("#   error_color: red (default: red)\n")
+        f.write("\n")
         cfg.write(f)
+
 
 
 config = load_config()
@@ -198,6 +234,7 @@ tk.Button(exit_frame, text="EXIT", font=fonts["FONT_BTN"],
 def on_close():
     running[0] = False
     cam_view.stop_all()
+    gps_core.stop_background_reader()
     root.destroy()
 
 

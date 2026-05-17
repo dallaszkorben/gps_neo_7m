@@ -6,7 +6,7 @@ so that the map marker stays current regardless of which view is active.
 """
 
 import tkinter as tk
-from gps_core import read_gps, _dd_to_dms
+from gps_core import get_latest, _dd_to_dms
 import gps_core
 
 
@@ -32,21 +32,24 @@ def create(parent, fonts, config, config_file):
     sat_var = tk.StringVar(value="Satellites: - used / - visible")
     status_var = tk.StringVar(value="")
 
-    # Large green text for coordinates — must be readable from a distance
-    # on a boat in daylight. Lime on black provides high contrast.
-    tk.Label(frame, textvariable=lat_var, font=fonts["FONT_COORD"],
-             fg='lime', bg='black').pack(pady=(40, 5))
-    tk.Label(frame, textvariable=lon_var, font=fonts["FONT_COORD"],
-             fg='lime', bg='black').pack(pady=5)
+    # Large text for coordinates — color changes based on fix status.
+    # Color is configurable via CONF menu (stored in see_board.cfg).
+    lat_label = tk.Label(frame, textvariable=lat_var, font=fonts["FONT_COORD"],
+                         fg='lime', bg='black')
+    lat_label.pack(pady=(40, 5))
+    lon_label = tk.Label(frame, textvariable=lon_var, font=fonts["FONT_COORD"],
+                         fg='lime', bg='black')
+    lon_label.pack(pady=5)
     tk.Label(frame, textvariable=time_var, font=fonts["FONT_INFO"],
              fg='white', bg='black').pack(pady=10)
     tk.Label(frame, textvariable=qual_var, font=fonts["FONT_INFO"],
              fg='white', bg='black').pack(pady=5)
     tk.Label(frame, textvariable=sat_var, font=fonts["FONT_INFO"],
              fg='white', bg='black').pack(pady=5)
-    # Red for errors/warnings — draws attention to problems
-    tk.Label(frame, textvariable=status_var, font=fonts["FONT_STATUS"],
-             fg='red', bg='black').pack(pady=20)
+    # Error/warning label — color read from config each time it's updated
+    status_label = tk.Label(frame, textvariable=status_var, font=fonts["FONT_STATUS"],
+                            fg='red', bg='black')
+    status_label.pack(pady=20)
 
     # Mutable state in lists so nested functions can modify them.
     # (Python closures can read but not assign to outer variables without nonlocal)
@@ -58,75 +61,61 @@ def create(parent, fonts, config, config_file):
 
         The config file is re-read (not just the in-memory object) because
         conf_view writes changes to disk. This ensures the DMS decimal
-        setting takes effect immediately when the user switches views.
+        and color settings take effect immediately when the user switches views.
         """
         config.read(config_file)
         gps_core.SHOW_DMS_DECIMALS = config.getboolean(
             'gps', 'show_dms_decimals', fallback=False)
 
     def update_gps(root, get_view_mode, marker, map_widget):
-        """Read GPS and update display. Schedules itself via root.after.
-
-        This loop runs regardless of which view is active because:
-        1. The map marker needs continuous position updates
-        2. GPS data must be consumed from the serial buffer to prevent overflow
-        3. Switching to COORDS should show current data immediately, not stale
-        """
-        data = read_gps()
+        """Display latest GPS data. Non-blocking — reads from background thread."""
+        data = get_latest()
 
         if data is None:
-            # Not a GGA/GSV sentence — try again quickly
-            root.after(100, lambda: update_gps(root, get_view_mode, marker, map_widget))
-            return
-
-        if data["status"] == "error":
-            status_var.set(f"\u26a0 {data['message']} \u2014 reconnecting...")
-            # Wait longer on error to avoid hammering a broken port
-            root.after(2000, lambda: update_gps(root, get_view_mode, marker, map_widget))
-            return
-
-        if data['status'] == 'no_data':
-            empty_reads[0] += 1
-            # Show warning after 10 consecutive empty reads (~1s at 100ms interval)
-            # to alert user about possible wiring issues
-            if empty_reads[0] >= 10:
-                status_var.set("\u26a0 No GPS data \u2014 check wiring!")
-                empty_reads[0] = 0
-            root.after(100, lambda: update_gps(root, get_view_mode, marker, map_widget))
-            return
-
-        empty_reads[0] = 0
-        status_var.set("")
-
-        if data['status'] == 'fix':
-            # Format at display time using _dd_to_dms() so that changes to
-            # SHOW_DMS_DECIMALS take effect within 1 second (next GPS read)
-            # without needing to restart the app.
+            # GPS disconnected or not responding — show last position in
+            # warning color and clear status fields to indicate data is stale.
+            nofix_color = config.get("coords", "nofix_color", fallback="red")
+            lat_label.config(fg=nofix_color)
+            lon_label.config(fg=nofix_color)
+            time_var.set("Time: --:--:--")
+            qual_var.set("Quality: No GPS")
+            sat_var.set("Satellites: - used / - visible")
+            error_color = config.get("coords", "error_color", fallback="red")
+            status_label.config(fg=error_color)
+            status_var.set("⚠ No GPS data")
+        elif data["status"] == "no_fix":
+            # Show stale coordinates in "no fix" color to indicate position is not current
+            nofix_color = config.get("coords", "nofix_color", fallback="red")
+            lat_label.config(fg=nofix_color)
+            lon_label.config(fg=nofix_color)
+            error_color = config.get("coords", "error_color", fallback="red")
+            status_label.config(fg=error_color)
+            status_var.set("Waiting for fix...")
+            qual_var.set("Quality: No fix")
+            time_var.set(f"Time: {data['time']}")
+            sat_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
+        elif data["status"] == "fix":
+            # Show coordinates in "fix" color to indicate position is current
+            fix_color = config.get("coords", "fix_color", fallback="lime")
+            lat_label.config(fg=fix_color)
+            lon_label.config(fg=fix_color)
+            status_var.set("")
             lat_var.set(f"{_dd_to_dms(data['lat_raw'])} {data['lat_dir']}")
             lon_var.set(f"{_dd_to_dms(data['lon_raw'])} {data['lon_dir']}")
             time_var.set(f"Time: {data['time']}")
             qual_var.set(f"Quality: {data['quality']}")
             sat_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
 
-            lat = data['lat_raw']
-            lon = data['lon_raw']
-            # Only update map when position actually changes to avoid
-            # unnecessary redraws (map redraw is expensive on Pi 3)
+            lat = data["lat_raw"]
+            lon = data["lon_raw"]
             if lat != last_pos[0] or lon != last_pos[1]:
                 marker.set_position(lat, lon)
-                if get_view_mode() == 'map':
+                if get_view_mode() == "map":
                     map_widget.set_position(lat, lon)
                 last_pos[0] = lat
                 last_pos[1] = lon
-        else:
-            lat_var.set("--°--'--\"")
-            lon_var.set("---°--'--\"")
-            status_var.set("Waiting for fix...")
-            qual_var.set("Quality: No fix")
-            time_var.set(f"Time: {data['time']}")
-            sat_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
 
-        # 1s interval matches the NEO-7M's default 1Hz update rate
-        root.after(1000, lambda: update_gps(root, get_view_mode, marker, map_widget))
+        # Poll every 500ms — background thread handles actual serial reading
+        root.after(500, lambda: update_gps(root, get_view_mode, marker, map_widget))
 
     return frame, update_gps, on_show

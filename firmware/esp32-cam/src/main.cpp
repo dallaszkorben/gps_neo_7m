@@ -28,11 +28,9 @@
 #include <esp_http_server.h>
 #include "esp_camera.h"
 
-// WiFi — connect to Pi's access point (open, no password)
-const char* WIFI_SSID = "GREEN-BEAN";
+// WiFi SSID defined in platformio.ini build_flags (-DWIFI_SSID)
 
-// Status LED — built-in on GPIO 2
-#define LED_PIN 2
+// LED_PIN defined in platformio.ini build_flags (-DLED_PIN)
 
 // ─── Camera pin mapping for Freenove ESP32-WROVER-CAM ───
 // These are fixed by the board's PCB layout — do not change
@@ -156,7 +154,7 @@ static esp_err_t index_handler(httpd_req_t *req) {
 // concurrent connections — multiple devices can view the stream simultaneously.
 void startWebServer() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 80;
+    config.server_port = WEB_PORT;
 
     if (httpd_start(&web_httpd, &config) == ESP_OK) {
         httpd_uri_t index_uri = {
@@ -166,11 +164,11 @@ void startWebServer() {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(web_httpd, &index_uri);
-        Serial.println("Web server on port 80");
+        Serial.printf("Web server on port %d\n", WEB_PORT);
     }
 
     // Separate server on port 81 for streaming
-    config.server_port = 81;
+    config.server_port = STREAM_PORT;
     config.ctrl_port = 32769;  // Must differ from port 80's control port
 
     if (httpd_start(&stream_httpd, &config) == ESP_OK) {
@@ -181,7 +179,7 @@ void startWebServer() {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(stream_httpd, &stream_uri);
-        Serial.println("Stream server on port 81");
+        Serial.printf("Stream server on port %d\n", STREAM_PORT);
     }
 }
 
@@ -195,7 +193,11 @@ void connectWiFi() {
         WiFi.mode(WIFI_OFF);
         delay(1000);
         WiFi.mode(WIFI_STA);
+        #ifdef WIFI_PASS
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
+        #else
         WiFi.begin(WIFI_SSID);
+        #endif
 
         Serial.printf("Connecting to '%s'...\n", WIFI_SSID);
         int attempts = 0;
@@ -219,7 +221,7 @@ void connectWiFi() {
 }
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(SERIAL_BAUD);
     delay(1000);
     Serial.println("\n\nESP32-CAM Starting...");
 
@@ -256,7 +258,7 @@ void setup() {
 
     if (MDNS.begin(hostname)) {
         // Advertise _mjpeg._tcp service so Pi can auto-discover all cameras
-        MDNS.addService("mjpeg", "tcp", 81);
+        MDNS.addService("mjpeg", "tcp", STREAM_PORT);
         Serial.printf("mDNS: %s.local\n", hostname);
     }
 

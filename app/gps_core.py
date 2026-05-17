@@ -112,9 +112,9 @@ def open_serial():
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
-            # 2s timeout: long enough for a full NMEA cycle (1s) but short
-            # enough to detect a disconnected module quickly.
-            timeout=2,
+            # 0.1s timeout: must be short to avoid blocking the tkinter main loop.
+            # GPS sends data every 1s; we poll frequently with short timeout.
+            timeout=0.1,
         )
         _ser.reset_input_buffer()
         return True
@@ -222,6 +222,64 @@ def close():
             pass
         _ser = None
     _restore_port_settings()
+
+
+# ─── Background GPS reader thread ───
+# GPS reading is done in a background thread to avoid blocking the tkinter
+# main loop. Without this, the 0.1s serial timeout would freeze the UI
+# (especially camera display) every time read_gps() is called.
+# The main thread polls get_latest() which returns instantly.
+# Runs continuously, stores latest parsed data in _latest_data.
+# The main thread (tkinter) reads _latest_data without blocking.
+import threading
+
+_latest_data = None
+_gps_thread = None
+_gps_running = False
+
+
+def _gps_reader_loop():
+    """Background thread: continuously reads GPS and stores latest result.
+    Clears stored data after repeated errors (GPS disconnected)."""
+    global _latest_data
+    _error_count = 0
+    while _gps_running:
+        data = read_gps()
+        if data is not None and data.get('status') in ('fix', 'no_fix'):
+            _latest_data = data
+            _error_count = 0
+        elif data is not None and data.get('status') == 'error':
+            _error_count += 1
+            # After 3 consecutive errors (~3s), clear data to signal GPS lost
+            if _error_count >= 3:
+                _latest_data = None
+        elif data is not None and data.get('status') == 'no_data':
+            _error_count += 1
+            if _error_count >= 30:
+                # 30 empty reads (~3s at 0.1s timeout) = GPS disconnected
+                _latest_data = None
+        # Small sleep to prevent tight loop when no data
+        if data is None or (data and data.get('status') == 'no_data'):
+            time.sleep(0.05)
+
+
+def start_background_reader():
+    """Start the background GPS reader thread."""
+    global _gps_thread, _gps_running
+    _gps_running = True
+    _gps_thread = threading.Thread(target=_gps_reader_loop, daemon=True)
+    _gps_thread.start()
+
+
+def stop_background_reader():
+    """Stop the background GPS reader thread."""
+    global _gps_running
+    _gps_running = False
+
+
+def get_latest():
+    """Get the latest GPS data (non-blocking, called from main thread)."""
+    return _latest_data
 
 
 atexit.register(close)

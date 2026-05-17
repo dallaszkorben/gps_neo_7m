@@ -20,7 +20,8 @@ DEFAULT_ZOOM = 13
 # Pre-downloaded OSM tiles (148 MB, zoom 8-17, Karlskrona area).
 # Stored as SQLite because tkintermapview's OfflineLoader uses this format.
 # The database must be generated beforehand using tools/download_tiles.py.
-TILES_DB = "/home/pi/Projects/seeboard/app/maps/tiles/osm_tiles.db"
+# Derived from script location so it works regardless of install path.
+TILES_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "maps", "tiles", "osm_tiles.db")
 
 
 def create(parent):

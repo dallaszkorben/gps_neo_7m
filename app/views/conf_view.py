@@ -83,4 +83,67 @@ def create(parent, fonts, config, save_config, config_file):
                        activebackground='black', activeforeground='white',
                        indicatoron=1).pack(side='left', padx=10)
 
+    # ─── Coordinate colors ───
+    # Radio buttons for fix/no-fix coordinate colors.
+    # Colors change in COORDS view to indicate whether position is current.
+    if not config.has_section("coords"):
+        config.add_section("coords")
+
+    COLORS = [("green", "lime"), ("red", "red"), ("blue", "cyan"), ("yellow", "yellow")]
+
+    # Fix color (when GPS has a valid position)
+    tk.Label(frame, text="Position color (GPS fix):", font=fonts["FONT_STATUS"],
+             fg='white', bg='black').pack(pady=(20, 5), padx=20, anchor='w')
+    fix_color_var = tk.StringVar(value=config.get("coords", "fix_color", fallback="lime"))
+
+    def on_fix_color():
+        config.set("coords", "fix_color", fix_color_var.get())
+        save_config(config)
+
+    fix_color_frame = tk.Frame(frame, bg='black')
+    fix_color_frame.pack(padx=20, anchor='w')
+    for label, value in COLORS:
+        tk.Radiobutton(fix_color_frame, text=label, variable=fix_color_var, value=value,
+                       command=on_fix_color, font=fonts["FONT_STATUS"],
+                       fg=value, bg='black', selectcolor='#333333',
+                       activebackground='black', activeforeground=value,
+                       indicatoron=1).pack(side='left', padx=10)
+
+    # No-fix color (when GPS lost fix, showing stale position)
+    tk.Label(frame, text="Position color (no fix):", font=fonts["FONT_STATUS"],
+             fg='white', bg='black').pack(pady=(20, 5), padx=20, anchor='w')
+    nofix_color_var = tk.StringVar(value=config.get("coords", "nofix_color", fallback="red"))
+
+    def on_nofix_color():
+        config.set("coords", "nofix_color", nofix_color_var.get())
+        save_config(config)
+
+    nofix_color_frame = tk.Frame(frame, bg='black')
+    nofix_color_frame.pack(padx=20, anchor='w')
+    for label, value in COLORS:
+        tk.Radiobutton(nofix_color_frame, text=label, variable=nofix_color_var, value=value,
+                       command=on_nofix_color, font=fonts["FONT_STATUS"],
+                       fg=value, bg='black', selectcolor='#333333',
+                       activebackground='black', activeforeground=value,
+                       indicatoron=1).pack(side='left', padx=10)
+
+    # ─── Error/warning message color ───
+    tk.Label(frame, text="Error message color:", font=fonts["FONT_STATUS"],
+             fg='white', bg='black').pack(pady=(20, 5), padx=20, anchor='w')
+
+    error_color_var = tk.StringVar(value=config.get("coords", "error_color", fallback="red"))
+
+    def on_error_color():
+        config.set("coords", "error_color", error_color_var.get())
+        save_config(config)
+
+    error_color_frame = tk.Frame(frame, bg='black')
+    error_color_frame.pack(padx=20, anchor='w')
+    for label_text, value in [("red", "red")]:
+        tk.Radiobutton(error_color_frame, text=label_text, variable=error_color_var, value=value,
+                       command=on_error_color, font=fonts["FONT_STATUS"],
+                       fg=value, bg='black', selectcolor='#333333',
+                       activebackground='black', activeforeground=value,
+                       indicatoron=1).pack(side='left', padx=10)
+
     return frame
