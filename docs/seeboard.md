@@ -417,3 +417,41 @@ same camera. Switch to COORDS/MAP view first to free the stream slot.
 3. Restart mDNS discovery
 4. Wait 2 seconds for live cameras to respond
 5. Rebuild grid with only responding cameras
+
+## Auto-start on Boot
+
+seeBoard launches automatically when the Pi boots. This is configured in two places:
+
+### 1. Autologin (no password prompt)
+Configured via `raspi-config` → Boot Options → Desktop Autologin.
+The Pi logs in as user `pi` without showing a login screen.
+
+Relevant file: `/etc/lightdm/lightdm.conf`
+```
+[Seat:*]
+autologin-user=pi
+```
+
+### 2. Wayfire autostart (launches seeboard.sh)
+The Wayfire compositor runs `seeboard.sh` after the desktop loads.
+
+Relevant file: `~/.config/wayfire.ini`
+```ini
+[autostart]
+seeboard = /home/pi/Projects/seeboard/seeboard.sh
+```
+
+### 3. Passwordless sudo for hotspot
+`seeboard.sh` activates the WiFi hotspot with `sudo nmcli`. To avoid a password prompt:
+
+Relevant file: `/etc/sudoers.d/010_pi-nmcli`
+```
+pi ALL=(ALL) NOPASSWD: /usr/bin/nmcli
+```
+
+### 4. Desktop icon (single-click)
+The desktop icon launches seeBoard with a single tap (no double-click needed).
+
+Relevant files:
+- `~/Desktop/seeboard.desktop` — the shortcut
+- `~/.config/libfm/libfm.conf` — `single_click=1` and `quick_exec=1`

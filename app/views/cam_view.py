@@ -1,11 +1,12 @@
 """CAM view — live MJPEG streams from ESP32 cameras with auto-discovery.
 
-Features:
-- Auto-discovers cameras via mDNS (no manual configuration)
-- Adds new cameras without interrupting existing streams
-- Shows "No Signal" overlay when a camera stops sending frames for 3+ seconds
-- Supports configurable image rotation from CONF view
-- Grid layout adapts automatically to camera count
+Display modes:
+- GRID mode: all cameras shown in an auto-sized grid layout
+- FOCUS mode: single selected camera shown fullscreen
+
+Tap a camera in grid mode to enter focus mode.
+Press CAM button to return to grid mode.
+Switching to another view resets to grid mode.
 """
 
 import tkinter as tk
@@ -18,15 +19,17 @@ import urllib.request as cam_urllib
 import time as _time
 
 
-# Module-level state (not instance-based) because tkinter is single-threaded
-# and we only ever have one CAM view.
+# Stream state
 _streams = {}   # {url: {"running": bool, "frame": bytes|None, "last_frame_time": float}}
-_known_urls = set()  # URLs we already have active streams for
-
-# How long to wait without receiving a frame before showing "No Signal".
-# 3 seconds balances between quick detection and avoiding false alarms
-# during brief network hiccups.
+_known_urls = set()
 _NO_SIGNAL_TIMEOUT = 3
+
+# Display mode: "grid" (all cameras) or "focus" (single camera fullscreen)
+_mode = "grid"
+# In focus mode, the URL of the focused camera
+_focus_url = None
+# Grid layout info for click detection
+_grid_info = {"cols": 0, "rows": 0, "cell_w": 0, "cell_h": 0, "n": 0}
 
 
 def _is_stale(state):
@@ -61,47 +64,83 @@ def create(parent, fonts):
     label = tk.Label(frame, text="Searching for cameras...",
                      font=fonts["FONT_STATUS"], fg="white", bg="black")
     label.pack(fill="both", expand=True)
+
+    # Tap on camera display: in grid mode selects a camera (enters focus mode)
+    label.bind("<Button-1>", _on_click)
+
     return frame, label
+
+
+def _on_click(event):
+    """Handle tap on camera display."""
+    global _mode, _focus_url
+
+    if _mode == "focus":
+        # Tap in focus mode returns to grid mode
+        _mode = "grid"
+        _focus_url = None
+        return
+
+    # Grid mode: determine which camera was tapped
+    urls = list(_streams.keys())
+    n = _grid_info["n"]
+
+    if n <= 1:
+        # Single camera in grid — tap enters focus mode for it
+        if n == 1:
+            _mode = "focus"
+            _focus_url = urls[0]
+        return
+
+    # Multi-camera grid: calculate which cell was tapped
+    cols = _grid_info["cols"]
+    cell_w = _grid_info["cell_w"]
+    cell_h = _grid_info["cell_h"]
+
+    if cell_w <= 0 or cell_h <= 0:
+        return
+
+    col = event.x // cell_w
+    row = event.y // cell_h
+    index = row * cols + col
+
+    if index < n:
+        _mode = "focus"
+        _focus_url = urls[index]
 
 
 def stop_all():
     """Stop all camera streams and clear state.
 
-    Called every time the user leaves CAM view. Streams are stopped to
-    free network bandwidth (important on the Pi's single WiFi interface
-    which is also serving as AP for the cameras).
+    Called every time the user leaves CAM view.
     """
-    global _streams, _known_urls
+    global _streams, _known_urls, _mode, _focus_url
     for s in _streams.values():
         s["running"] = False
     _streams = {}
     _known_urls = set()
+    _mode = "grid"
+    _focus_url = None
 
 
 def on_show(root, rebuild_delay=2000):
-    """Called when switching to CAM view — reset discovery and rebuild.
+    """Called when switching to CAM view — reset to grid mode and rediscover.
 
-    Resets mDNS discovery cache so that only currently-alive cameras are
-    shown. The 2s delay gives cameras time to respond to the new mDNS query.
-    Without the delay, we'd often get 0 cameras on the first frame.
+    Pressing CAM button always returns to grid mode with fresh discovery.
     """
+    global _mode, _focus_url
+    _mode = "grid"
+    _focus_url = None
     reset_cam_discovery()
     root.after(rebuild_delay, _start_new_cameras)
 
 
 def _start_new_cameras():
-    """Start streams for any newly discovered cameras without stopping existing ones.
-
-    This is the key design choice: we never stop working streams when a new
-    camera appears. We only add new ones. This prevents the black screen
-    flash that happened when all streams were killed and restarted.
-    """
+    """Start streams for newly discovered cameras without stopping existing ones."""
     global _known_urls
     cameras = get_cameras()
     new_urls = {url for url in cameras.values()} - _known_urls
     for url in new_urls:
-        # last_frame_time initialized to now so we don't immediately show
-        # "No Signal" before the first frame arrives from the network.
         state = {"running": True, "frame": None, "last_frame_time": _time.time()}
         t = threading.Thread(target=_reader, args=(url, state), daemon=True)
         t.start()
@@ -110,24 +149,11 @@ def _start_new_cameras():
 
 
 def _reader(url, state):
-    """Background thread: reads MJPEG stream, extracts JPEG frames.
-
-    MJPEG is a sequence of JPEG images. We find frame boundaries by
-    looking for JPEG SOI (0xFFD8) and EOI (0xFFD9) markers in the byte
-    stream. Only the latest frame is kept — older frames are discarded
-    to prevent lag buildup.
-
-    Reconnects automatically on network errors (1s backoff). The ESP32
-    cameras support only ~1 concurrent client, so if another client
-    connects, this stream may drop and reconnect.
-    """
-    # Cap buffer at 200KB to prevent memory growth if frames aren't consumed
+    """Background thread: reads MJPEG stream, extracts JPEG frames."""
     MAX_BUF = 200000
     while state["running"]:
         try:
             stream = cam_urllib.urlopen(url, timeout=5)
-            # Set socket timeout to detect dead connections faster than
-            # the default (which can hang for minutes)
             stream.fp.raw._sock.settimeout(10)
             buf = b""
             while state["running"]:
@@ -137,7 +163,6 @@ def _reader(url, state):
                 buf += chunk
                 if len(buf) > MAX_BUF:
                     buf = buf[-MAX_BUF:]
-                # Extract all complete JPEG frames from buffer
                 while True:
                     s = buf.find(b"\xff\xd8")
                     e = buf.find(b"\xff\xd9", s + 2) if s != -1 else -1
@@ -149,16 +174,11 @@ def _reader(url, state):
                         break
         except Exception:
             pass
-        # Brief pause before reconnect to avoid hammering a dead camera
         _time.sleep(1)
 
 
 def update_cam(root, label, config, get_view_mode, running_flag):
-    """Update camera display. Schedules itself every 50ms (~20fps).
-
-    Only processes frames when CAM view is active to save CPU.
-    Also checks for newly discovered cameras and starts streams for them.
-    """
+    """Update camera display. Schedules itself every 50ms (~20fps)."""
     try:
         if get_view_mode() == "cam":
             _start_new_cameras()
@@ -168,10 +188,13 @@ def update_cam(root, label, config, get_view_mode, running_flag):
             if n == 0:
                 label.config(text="Searching for cameras...", image="")
                 label.image = None
+            elif _mode == "focus" and _focus_url in _streams:
+                # Focus mode: show selected camera fullscreen
+                _display_focus(root, label, config)
             elif n == 1:
                 _display_single(root, label, urls[0], config)
             else:
-                _display_multi(root, label, urls, n, config)
+                _display_grid(root, label, urls, n, config)
     except Exception:
         pass
 
@@ -179,28 +202,25 @@ def update_cam(root, label, config, get_view_mode, running_flag):
         root.after(50, lambda: update_cam(root, label, config, get_view_mode, running_flag))
 
 
-def _display_single(root, label, url, config):
-    """Display a single camera fullscreen with aspect ratio preserved."""
-    f = _streams[url]["frame"]
+def _display_focus(root, label, config):
+    """Focus mode: display the selected camera fullscreen."""
+    f = _streams[_focus_url]["frame"]
     if not f:
         return
     try:
         img = Image.open(io.BytesIO(f))
         rot = config.getint("cam", "rotation", fallback=0)
         if rot:
-            # Negative because PIL rotates counter-clockwise but users
-            # expect clockwise (90° = turn right)
             img = img.rotate(-rot, expand=True)
-        # Subtract button panel width (120px) from available space
         w = root.winfo_width() - 120
         h = root.winfo_height()
         if w > 50 and h > 50:
             iw, ih = img.size
             scale = min(w / iw, h / ih)
             img = img.resize((int(iw * scale), int(ih * scale)), Image.BILINEAR)
-        # Show "No Signal" overlay if no new frame for 3+ seconds
-        if _is_stale(_streams[url]):
-            img = _draw_no_signal(img)
+        if _is_stale(_streams[_focus_url]):
+            err_color = config.get("coords", "error_color", fallback="red")
+            img = _draw_no_signal(img, err_color)
         photo = ImageTk.PhotoImage(img)
         label.config(image=photo, text="")
         label.image = photo
@@ -208,12 +228,37 @@ def _display_single(root, label, url, config):
         pass
 
 
-def _display_multi(root, label, urls, n, config):
-    """Display multiple cameras in a grid composite image.
+def _display_single(root, label, url, config):
+    """Grid mode with 1 camera: display fullscreen."""
+    global _grid_info
+    f = _streams[url]["frame"]
+    if not f:
+        return
+    try:
+        img = Image.open(io.BytesIO(f))
+        rot = config.getint("cam", "rotation", fallback=0)
+        if rot:
+            img = img.rotate(-rot, expand=True)
+        w = root.winfo_width() - 120
+        h = root.winfo_height()
+        if w > 50 and h > 50:
+            iw, ih = img.size
+            scale = min(w / iw, h / ih)
+            img = img.resize((int(iw * scale), int(ih * scale)), Image.BILINEAR)
+        if _is_stale(_streams[url]):
+            err_color = config.get("coords", "error_color", fallback="red")
+            img = _draw_no_signal(img, err_color)
+        _grid_info = {"cols": 1, "rows": 1, "cell_w": img.size[0], "cell_h": img.size[1], "n": 1}
+        photo = ImageTk.PhotoImage(img)
+        label.config(image=photo, text="")
+        label.image = photo
+    except Exception:
+        pass
 
-    Grid sizing: sqrt(n) columns gives a roughly square grid.
-    1 cam = full, 2 = 2x1, 3-4 = 2x2, 5-6 = 3x2, 7-9 = 3x3.
-    """
+
+def _display_grid(root, label, urls, n, config):
+    """Grid mode: display all cameras in a composite grid."""
+    global _grid_info
     cols = math.ceil(math.sqrt(n))
     rows = math.ceil(n / cols)
     w = root.winfo_width() - 120
@@ -222,6 +267,7 @@ def _display_multi(root, label, urls, n, config):
         return
     cell_w = w // cols
     cell_h = h // rows
+    _grid_info = {"cols": cols, "rows": rows, "cell_w": cell_w, "cell_h": cell_h, "n": n}
     composite = Image.new("RGB", (w, h), "black")
     has_frame = False
     for i, url in enumerate(urls):
@@ -237,14 +283,13 @@ def _display_multi(root, label, urls, n, config):
                 scale = min(cell_w / iw, cell_h / ih)
                 img = img.resize((int(iw * scale), int(ih * scale)), Image.BILINEAR)
                 if _is_stale(_streams[url]):
-                    img = _draw_no_signal(img)
+                    err_color = config.get("coords", "error_color", fallback="red")
+                    img = _draw_no_signal(img, err_color)
                 r = i // cols
                 c = i % cols
                 composite.paste(img, (c * cell_w, r * cell_h))
             except Exception:
                 pass
-    # Only update display if at least one frame exists — avoids black flash
-    # during initial stream connection
     if has_frame:
         photo = ImageTk.PhotoImage(composite)
         label.config(image=photo, text="")
