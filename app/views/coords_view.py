@@ -92,7 +92,7 @@ def create(parent, fonts, config, config_file):
             status_label.config(fg=error_color)
             status_var.set("Waiting for fix...")
             qual_var.set("Quality: No fix")
-            time_var.set(f"Time: {data['time']}")
+            time_var.set(f"Time: {data['time']}" if data['time'] and str(data['time']) != "None" else "Time: --:--:--")
             sat_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
         elif data["status"] == "fix":
             # Show coordinates in "fix" color to indicate position is current
@@ -102,7 +102,7 @@ def create(parent, fonts, config, config_file):
             status_var.set("")
             lat_var.set(f"{_dd_to_dms(data['lat_raw'])} {data['lat_dir']}")
             lon_var.set(f"{_dd_to_dms(data['lon_raw'])} {data['lon_dir']}")
-            time_var.set(f"Time: {data['time']}")
+            time_var.set(f"Time: {data['time']}" if data['time'] and str(data['time']) != "None" else "Time: --:--:--")
             qual_var.set(f"Quality: {data['quality']}")
             sat_var.set(f"Satellites: {data['sats_used']} used / {data['sats_visible']} visible")
 
